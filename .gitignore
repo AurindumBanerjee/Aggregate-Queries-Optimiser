@@ -1,0 +1,9 @@
+build*/
+out/
+*.db
+*.wal
+.env
+*.o
+*.exe
+bench/data/
+.vscode/

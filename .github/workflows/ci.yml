@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            flags: -DCMAKE_BUILD_TYPE=Release
+          - name: asan-ubsan
+            flags: -DCMAKE_BUILD_TYPE=Debug -DAQO_SANITIZE=ON
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev libsqlite3-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev libsqlite3-dev gcovr
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DAQO_COVERAGE=ON
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - name: Enforce >= 70% line coverage on core logic
+        run: gcovr -r . --filter 'include/aqo/' --filter 'src/' --fail-under-line 70 --print-summary
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format check
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang-format
+          find include src tests bench -name '*.cpp' -o -name '*.hpp' 2>/dev/null | xargs clang-format --dry-run --Werror
