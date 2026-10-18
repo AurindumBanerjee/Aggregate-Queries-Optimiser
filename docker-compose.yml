@@ -1,0 +1,22 @@
+# docker compose run --rm aqo            -> interactive SQL shell on a persistent volume
+# docker compose run --rm test           -> build + run the whole test suite
+# docker compose run --rm bench          -> 1M-row benchmark vs SQLite (writes ./bench/results)
+services:
+  aqo:
+    build: { context: ., target: runtime }
+    env_file: [{ path: .env, required: false }]
+    environment:
+      AQO_DB_PATH: /data/aqo.db
+    volumes: ["aqo-data:/data"]
+    stdin_open: true
+    tty: true
+  test:
+    build: { context: ., target: test }
+    entrypoint: ["true"]
+  bench:
+    build: { context: ., target: runtime }
+    entrypoint: ["aqo_bench", "--rows", "1000000", "--dir", "/tmp/bench", "--out", "/results/results.json"]
+    volumes: ["./bench/results:/results"]
+    user: root
+volumes:
+  aqo-data:

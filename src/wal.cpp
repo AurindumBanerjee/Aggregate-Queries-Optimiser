@@ -1,7 +1,10 @@
 #include "aqo/wal.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <memory>
+#include <thread>
 
 #include "aqo/disk_manager.hpp"
 
@@ -270,13 +273,30 @@ std::optional<LogRecord> Wal::read(lsn_t lsn) {
 }
 
 void Wal::scan(lsn_t from, const std::function<bool(const LogRecord&)>& fn) {
+  write_buffer_to_os();  // make unflushed records visible to the reader below
   lsn_t lsn = from == 0 ? base_lsn_ : from;
-  lsn_t end = end_lsn();
-  while (lsn < end) {
-    auto r = read(lsn);
-    if (!r) return;
-    if (!fn(*r)) return;
-    lsn += 8 + encode(*r).size();
+  if (lsn < base_lsn_ || offset_of(lsn) >= file_end_) return;
+  std::unique_ptr<std::FILE, int (*)(std::FILE*)> file(std::fopen(path_.c_str(), "rb"), &std::fclose);  // closed even if fn throws
+  std::FILE* f = file.get();
+  if (f == nullptr) throw StorageError("cannot open WAL for scanning");
+  std::setvbuf(f, nullptr, _IOFBF, 1 << 20);
+  std::fseek(f, static_cast<long>(offset_of(lsn)), SEEK_SET);
+  std::vector<std::byte> payload;
+  std::uint64_t pos = offset_of(lsn);
+  while (pos < file_end_) {
+    std::byte fh[8];
+    if (std::fread(fh, 1, 8, f) != 8) break;
+    auto len = load<std::uint32_t>(fh);
+    if (len == 0 || len > kMaxPayload) break;
+    payload.resize(len);
+    if (std::fread(payload.data(), 1, len, f) != len) break;
+    if (crc32(payload.data(), len) != load<std::uint32_t>(fh + 4)) break;
+    LogRecord r;
+    if (!decode(payload.data(), len, r)) break;
+    r.lsn = lsn;
+    if (!fn(r)) break;
+    lsn += 8 + len;
+    pos += 8 + len;
   }
 }
 
@@ -288,19 +308,40 @@ void Wal::set_checkpoint(lsn_t lsn) {
 
 void Wal::truncate_all() {
   flush_all();
-  base_lsn_ = end_lsn();
-  checkpoint_lsn_ = 0;
+  const lsn_t old_base = base_lsn_, old_ckpt = checkpoint_lsn_;
+  const lsn_t new_base = end_lsn();
   std::string tmp = path_ + ".tmp";
+  base_lsn_ = new_base;  // write_header serialises the members
+  checkpoint_lsn_ = 0;
   std::FILE* f = std::fopen(tmp.c_str(), "wb");
-  if (f == nullptr) throw StorageError("cannot create " + tmp);
+  if (f == nullptr) {
+    base_lsn_ = old_base;
+    checkpoint_lsn_ = old_ckpt;
+    throw StorageError("cannot create " + tmp);
+  }
   write_header(f);
   sync_file(f);
   std::fclose(f);
   std::fclose(file_);
   file_ = nullptr;
-  std::filesystem::rename(tmp, path_);  // atomically replaces the old log
-  file_end_ = synced_size_ = kHeaderSize;
-  buffer_.clear();
+  // Another process (antivirus, indexer) can briefly hold the file on Windows, making the rename fail.
+  // Retry; if it never succeeds keep the old log: the checkpoint is still valid, the log just stays long.
+  bool replaced = false;
+  for (int attempt = 0; attempt < 100 && !replaced; ++attempt) {
+    std::error_code ec;
+    std::filesystem::rename(tmp, path_, ec);
+    replaced = !ec;
+    if (!replaced) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (replaced) {
+    file_end_ = synced_size_ = kHeaderSize;
+    buffer_.clear();
+  } else {
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+    base_lsn_ = old_base;
+    checkpoint_lsn_ = old_ckpt;
+  }
   open_file();
 }
 

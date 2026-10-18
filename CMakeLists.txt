@@ -45,3 +45,9 @@ endif()
 
 add_executable(aqo_cli tools/aqo_cli.cpp)
 target_link_libraries(aqo_cli PRIVATE aqo)
+
+if(AQO_BUILD_BENCH)
+  find_package(SQLite3 REQUIRED)
+  add_executable(aqo_bench bench/bench.cpp)
+  target_link_libraries(aqo_bench PRIVATE aqo SQLite::SQLite3)
+endif()

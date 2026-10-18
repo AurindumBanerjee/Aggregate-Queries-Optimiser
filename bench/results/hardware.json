@@ -1,0 +1,10 @@
+{
+  "os": "Windows-11-10.0.26300-SP0",
+  "python": "3.12.3",
+  "machine": "AMD64",
+  "cpu": "12th Gen Intel(R) Core(TM) i5-1240P",
+  "cores": "12",
+  "logical_processors": "16",
+  "ram_gib": "63.7",
+  "disk": "WD_BLACK SN770 1TB"
+}
