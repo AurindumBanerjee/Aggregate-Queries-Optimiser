@@ -1,0 +1,34 @@
+insert aqo   sequential pk                           142058 rows/s
+insert sqlite sequential pk                          304791 rows/s
+insert aqo   random pk                                57871 rows/s
+insert sqlite random pk                               26665 rows/s
+insert aqo   sequential pk + aggregate indexes        29760 rows/s
+insert sqlite sequential pk + aggregate indexes       18424 rows/s
+aqo reopen + index rebuild: 9.98 s
+lookup aqo     Table::get (no SQL)        88494 ops/s  p50 2.70 us  p99 66.00 us
+lookup aqo     SQL (parse+plan each time)     43734 ops/s  p50 14.00 us  p99 92.60 us
+lookup sqlite  prepared, autocommit reads     44960 ops/s  p50 17.00 us  p99 60.40 us
+lookup sqlite  prepared, one open read txn    504938 ops/s  p50 1.60 us  p99 4.40 us
+agg sel 0.01%   aqo     aggregate index via SQL            p50       39.6 us  (20915 q/s)
+agg sel 0.01%   aqo     aggregate index direct API         p50        9.7 us  (92481 q/s)
+agg sel 0.01%   sqlite  covering index (a,b,c)             p50       67.1 us  (14150 q/s)
+agg sel 0.1%    aqo     aggregate index via SQL            p50       52.1 us  (18003 q/s)
+agg sel 0.1%    aqo     aggregate index direct API         p50       22.6 us  (41480 q/s)
+agg sel 0.1%    sqlite  covering index (a,b,c)             p50      571.7 us  (1691 q/s)
+agg sel 1%      aqo     aggregate index via SQL            p50       35.0 us  (27660 q/s)
+agg sel 1%      aqo     aggregate index direct API         p50       22.8 us  (44756 q/s)
+agg sel 1%      sqlite  covering index (a,b,c)             p50     2546.7 us  (349 q/s)
+agg sel 1%      aqo     full scan (index disabled)         p50   868706.3 us  (1 q/s)
+agg sel 10%     aqo     aggregate index via SQL            p50       47.7 us  (19329 q/s)
+agg sel 10%     aqo     aggregate index direct API         p50       29.8 us  (28100 q/s)
+agg sel 10%     sqlite  covering index (a,b,c)             p50    26681.9 us  (33 q/s)
+agg sel 50%     aqo     aggregate index via SQL            p50       63.3 us  (15537 q/s)
+agg sel 50%     aqo     aggregate index direct API         p50       50.7 us  (19762 q/s)
+agg sel 50%     sqlite  covering index (a,b,c)             p50   118821.4 us  (8 q/s)
+agg sel 50%     aqo     full scan (index disabled)         p50   754353.7 us  (1 q/s)
+agg sel 1%      sqlite  no index (full scan)               p50    88970.0 us
+update aqo (with agg index): 18937 ops/s
+pool LRU   hit 0.758  36288 ops/s
+pool Clock hit 0.752  35036 ops/s
+recovery of 100k inserts: 486.6 ms (106764 log records, 106761 page redos)
+wrote bench/results/results.json

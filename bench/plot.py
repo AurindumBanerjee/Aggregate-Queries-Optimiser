@@ -12,9 +12,33 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parent.parent
-src = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "bench" / "results" / "results.json"
-data = json.loads(src.read_text(encoding="utf-8"))
-res = data["results"]
+import statistics
+
+# Every file in bench/results/runs/ is one full benchmark run; reported numbers are the median across
+# runs and the table also shows the min-max spread (run-to-run variance on a laptop is large).
+run_files = sorted((ROOT / "bench" / "results" / "runs").glob("run*.json")) if len(sys.argv) < 2 else [Path(a) for a in sys.argv[1:]]
+runs = [json.loads(f.read_text(encoding="utf-8")) for f in run_files]
+data = {"config": runs[0]["config"], "n_runs": len(runs)}
+
+
+def key(r):
+    return (r["workload"], r["engine"], r["variant"], r.get("selectivity"))
+
+
+merged = {}
+for run in runs:
+    for r in run["results"]:
+        merged.setdefault(key(r), []).append(r)
+res = []
+for k, rs in merged.items():
+    out = dict(rs[0])
+    for f, v in rs[0].items():
+        if isinstance(v, (int, float)) and f != "selectivity":
+            vals = [r[f] for r in rs if f in r]
+            out[f] = statistics.median(vals)
+            out[f + "_min"], out[f + "_max"] = min(vals), max(vals)
+    res.append(out)
+(ROOT / "bench" / "results" / "results.json").write_text(json.dumps({"config": data["config"], "runs": [f.name for f in run_files], "results": res}, indent=1), encoding="utf-8")
 docs = ROOT / "docs"
 docs.mkdir(exist_ok=True)
 
@@ -80,7 +104,8 @@ for v in variants:
     a = next(iter(pick("insert", engine="aqo", variant=v)), None)
     s = next(iter(pick("insert", engine="sqlite", variant=v)), None)
     if a and s:
-        rows.append((f"Insert, {v} (rows/s)", fmt(a["rows_per_sec"], 0), fmt(s["rows_per_sec"], 0)))
+        rows.append((f"Insert, {v} (rows/s)", f"{fmt(a['rows_per_sec'], 0)} ({fmt(a['rows_per_sec_min'], 0)}–{fmt(a['rows_per_sec_max'], 0)})",
+                     f"{fmt(s['rows_per_sec'], 0)} ({fmt(s['rows_per_sec_min'], 0)}–{fmt(s['rows_per_sec_max'], 0)})"))
 for r in pick("point_lookup"):
     rows.append((f"Point lookup: {r['engine']} {r['variant']} (ops/s, p50 µs)", f"{fmt(r['ops_per_sec'], 0)} / {r['p50_us']:.2f}" if r["engine"] == "aqo" else "-",
                  f"{fmt(r['ops_per_sec'], 0)} / {r['p50_us']:.2f}" if r["engine"] == "sqlite" else "-"))
@@ -88,7 +113,8 @@ for sel in sorted({r["selectivity"] for r in pick("range_aggregate")}):
     a = next(iter(pick("range_aggregate", engine="aqo", variant="aggregate index direct API", selectivity=sel)), None)
     s = next(iter(pick("range_aggregate", engine="sqlite", variant="covering index (a,b,c)", selectivity=sel)), None)
     if a and s:
-        rows.append((f"Range aggregate {sel*100:g}% of rows, p50 µs", fmt(a["p50_us"], 1), fmt(s["p50_us"], 1)))
+        rows.append((f"Range aggregate {sel*100:g}% of rows, p50 µs", f"{fmt(a['p50_us'], 1)} ({fmt(a['p50_us_min'], 1)}–{fmt(a['p50_us_max'], 1)})",
+                     f"{fmt(s['p50_us'], 1)} ({fmt(s['p50_us_min'], 1)}–{fmt(s['p50_us_max'], 1)})"))
 md = ["| Workload | aqo | SQLite |", "|---|---:|---:|"] + [f"| {a} | {b} | {c} |" for a, b, c in rows]
 (ROOT / "bench" / "results" / "table.md").write_text("\n".join(md) + "\n")
 print("\n".join(md))
