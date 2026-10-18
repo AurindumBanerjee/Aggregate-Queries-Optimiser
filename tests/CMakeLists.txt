@@ -8,9 +8,15 @@ add_executable(aqo_tests
   engine_test.cpp
   table_test.cpp
   range_structs_test.cpp
+  sql_test.cpp
   crash_kill_test.cpp
 )
 target_link_libraries(aqo_tests PRIVATE aqo GTest::gtest GTest::gtest_main)
+
+if(SQLite3_FOUND)
+  target_sources(aqo_tests PRIVATE sqlite_diff_test.cpp)
+  target_link_libraries(aqo_tests PRIVATE SQLite::SQLite3)
+endif()
 
 add_executable(crash_worker crash_worker.cpp)
 target_link_libraries(crash_worker PRIVATE aqo)

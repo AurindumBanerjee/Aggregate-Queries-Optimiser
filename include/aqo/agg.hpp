@@ -107,6 +107,10 @@ struct ValueRange {
   void restrict_hi(const Value& v, bool incl);
 };
 
+/// Inclusive int64 interval equivalent to `r` over an INT column (fractional/out-of-range literals are
+/// rounded inward); nullopt if no integer can satisfy it.
+std::optional<std::pair<std::int64_t, std::int64_t>> int_interval(const ValueRange& r);
+
 class AggIndex {
  public:
   using Tree = BPlusTree<IdxKey, RowNums, RowStatsAgg, 32>;

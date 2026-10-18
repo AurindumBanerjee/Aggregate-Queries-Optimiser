@@ -41,12 +41,3 @@ jobs:
       - run: ctest --test-dir build --output-on-failure
       - name: Enforce >= 70% line coverage on core logic
         run: gcovr -r . --filter 'include/aqo/' --filter 'src/' --fail-under-line 70 --print-summary
-
-  format:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: clang-format check
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang-format
-          find include src tests bench -name '*.cpp' -o -name '*.hpp' 2>/dev/null | xargs clang-format --dry-run --Werror

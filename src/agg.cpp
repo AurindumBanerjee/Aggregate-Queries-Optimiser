@@ -70,49 +70,56 @@ void AggIndex::remove(const Row& row) {
   if (!tree_.erase(key_of(row))) throw StorageError("aggregate index out of sync with table");
 }
 
+std::optional<std::pair<std::int64_t, std::int64_t>> int_interval(const ValueRange& r) {
+  if (r.empty) return std::nullopt;
+  std::int64_t lo = kMin, hi = kMax;
+  if (r.lo) {
+    if (!is_numeric(*r.lo)) return std::nullopt;
+    if (auto* i = std::get_if<std::int64_t>(&*r.lo)) {
+      if (!r.lo_incl) {
+        if (*i == kMax) return std::nullopt;
+        lo = *i + 1;
+      } else {
+        lo = *i;
+      }
+    } else {
+      double d = std::get<double>(*r.lo);
+      if (std::isnan(d)) return std::nullopt;
+      double c = r.lo_incl ? std::ceil(d) : std::floor(d) + 1.0;
+      if (c >= 9223372036854775808.0) return std::nullopt;
+      if (c > -9223372036854775808.0) lo = static_cast<std::int64_t>(c);
+    }
+  }
+  if (r.hi) {
+    if (!is_numeric(*r.hi)) return std::nullopt;
+    if (auto* i = std::get_if<std::int64_t>(&*r.hi)) {
+      if (!r.hi_incl) {
+        if (*i == kMin) return std::nullopt;
+        hi = *i - 1;
+      } else {
+        hi = *i;
+      }
+    } else {
+      double d = std::get<double>(*r.hi);
+      if (std::isnan(d)) return std::nullopt;
+      double f = r.hi_incl ? std::floor(d) : std::ceil(d) - 1.0;
+      if (f < -9223372036854775808.0) return std::nullopt;
+      if (f < 9223372036854775808.0) hi = static_cast<std::int64_t>(f);
+    }
+  }
+  if (lo > hi) return std::nullopt;
+  return std::make_pair(lo, hi);
+}
+
 std::optional<KeyRange<IdxKey>> AggIndex::to_key_range(const ValueRange& r) const {
   if (r.empty) return std::nullopt;
   KeyRange<IdxKey> out;
   out.lo_inclusive = out.hi_inclusive = true;
   if (type_ == ColType::kInt) {
-    std::int64_t lo = kMin, hi = kMax;
-    if (r.lo) {
-      if (!is_numeric(*r.lo)) return std::nullopt;
-      if (auto* i = std::get_if<std::int64_t>(&*r.lo)) {
-        if (!r.lo_incl) {
-          if (*i == kMax) return std::nullopt;
-          lo = *i + 1;
-        } else {
-          lo = *i;
-        }
-      } else {
-        double d = std::get<double>(*r.lo);
-        if (std::isnan(d)) return std::nullopt;
-        double c = r.lo_incl ? std::ceil(d) : std::floor(d) + 1.0;
-        if (c >= 9223372036854775808.0) return std::nullopt;
-        if (c > -9223372036854775808.0) lo = static_cast<std::int64_t>(c);
-      }
-    }
-    if (r.hi) {
-      if (!is_numeric(*r.hi)) return std::nullopt;
-      if (auto* i = std::get_if<std::int64_t>(&*r.hi)) {
-        if (!r.hi_incl) {
-          if (*i == kMin) return std::nullopt;
-          hi = *i - 1;
-        } else {
-          hi = *i;
-        }
-      } else {
-        double d = std::get<double>(*r.hi);
-        if (std::isnan(d)) return std::nullopt;
-        double f = r.hi_incl ? std::floor(d) : std::ceil(d) - 1.0;
-        if (f < -9223372036854775808.0) return std::nullopt;
-        if (f < 9223372036854775808.0) hi = static_cast<std::int64_t>(f);
-      }
-    }
-    if (lo > hi) return std::nullopt;
-    if (r.lo) out.lo = IdxKey{lo, kMin};
-    if (r.hi) out.hi = IdxKey{hi, kMax};
+    auto iv = int_interval(r);
+    if (!iv) return std::nullopt;
+    if (r.lo) out.lo = IdxKey{iv->first, kMin};
+    if (r.hi) out.hi = IdxKey{iv->second, kMax};
     return out;
   }
   // REAL column
