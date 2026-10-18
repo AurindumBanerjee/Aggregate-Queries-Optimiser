@@ -10,6 +10,7 @@
 #pragma once
 
 #include <optional>
+#include <shared_mutex>
 
 #include "aqo/database.hpp"
 #include "aqo/sql/parser.hpp"
@@ -56,6 +57,7 @@ class Session {
   Database& db_;
   SessionOptions opts_;
   std::optional<Txn> txn_;
+  std::unique_lock<std::shared_mutex> txn_lock_;  // exclusive lock held for the life of an explicit transaction
 };
 
 }  // namespace aqo::sql

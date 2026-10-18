@@ -213,7 +213,9 @@ Session::~Session() {
       txn_->abort();
     } catch (...) {
     }
+    txn_.reset();
   }
+  if (txn_lock_.owns_lock()) txn_lock_.unlock();
 }
 
 ResultSet Session::execute(const std::string& sql) {
@@ -232,35 +234,51 @@ ResultSet Session::run(ParsedStatement& ps) {
   ResultSet rs;
   if (auto* tc = std::get_if<TxnControl>(&ps.stmt)) {
     switch (tc->kind) {
-      case TxnControl::kBegin:
+      case TxnControl::kBegin: {
         if (txn_) throw SqlError("a transaction is already open");
+        std::unique_lock<std::shared_mutex> lk(db_.rw_mutex());  // blocks until all readers/writers finish
         txn_ = db_.engine().begin();
+        txn_lock_ = std::move(lk);
         rs.message = "BEGIN";
         break;
+      }
       case TxnControl::kCommit:
         if (!txn_) throw SqlError("no transaction is open");
-        txn_->commit();
+        try {
+          txn_->commit();
+        } catch (...) {
+          txn_.reset();
+          txn_lock_.unlock();
+          throw;
+        }
         txn_.reset();
+        txn_lock_.unlock();
         rs.message = "COMMIT";
         break;
       case TxnControl::kRollback:
         if (!txn_) throw SqlError("no transaction is open");
         txn_->abort();
         txn_.reset();
+        txn_lock_.unlock();
         rs.message = "ROLLBACK";
         break;
     }
   } else if (std::holds_alternative<Select>(ps.stmt) || ps.explain) {
-    rs = dispatch(ps);  // reads need no write transaction
+    // Reads need no write transaction; inside our own transaction we already hold the exclusive lock.
+    std::shared_lock<std::shared_mutex> rd;
+    if (!txn_) rd = std::shared_lock<std::shared_mutex>(db_.rw_mutex());
+    rs = dispatch(ps);
   } else if (txn_) {
     try {
       rs = dispatch(ps);
     } catch (const std::exception& e) {
       txn_->abort();
       txn_.reset();
+      txn_lock_.unlock();
       throw SqlError(std::string(e.what()) + " (transaction rolled back)");
     }
   } else {
+    std::unique_lock<std::shared_mutex> wr(db_.rw_mutex());
     Txn tx = db_.engine().begin();
     try {
       rs = dispatch(ps);

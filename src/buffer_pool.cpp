@@ -130,6 +130,11 @@ std::size_t BufferPool::acquire_frame() {
 }
 
 PageGuard BufferPool::fetch(page_id_t pid) {
+  std::lock_guard<std::mutex> l(mu_);
+  return fetch_locked(pid);
+}
+
+PageGuard BufferPool::fetch_locked(page_id_t pid) {
   if (auto it = table_.find(pid); it != table_.end()) {
     ++stats_.hits;
     Frame& f = *frames_[it->second];
@@ -154,9 +159,13 @@ PageGuard BufferPool::fetch(page_id_t pid) {
 
 PageGuard BufferPool::fetch_write(page_id_t pid) {
   if (write_gate_) write_gate_();
-  PageGuard g = fetch(pid);
+  std::unique_lock<std::mutex> l(mu_);
+  PageGuard g = fetch_locked(pid);
   Frame& f = *frames_[g.frame_];
-  if (f.writer) throw StorageError("page " + std::to_string(pid) + " already has an active write guard");
+  if (f.writer) {
+    l.unlock();  // g's destructor re-locks the pool while unwinding
+    throw StorageError("page " + std::to_string(pid) + " already has an active write guard");
+  }
   f.writer = true;
   g.writer_ = true;
   g.mark_dirty();
@@ -168,6 +177,7 @@ PageGuard BufferPool::fetch_write(page_id_t pid) {
 }
 
 void BufferPool::unpin(std::size_t frame, bool dirty, bool was_writer, const std::byte* before) {
+  std::lock_guard<std::mutex> l(mu_);
   Frame& f = *frames_[frame];
   if (f.pins == 0) throw StorageError("unpin of an unpinned page");
   if (was_writer) {
@@ -179,6 +189,7 @@ void BufferPool::unpin(std::size_t frame, bool dirty, bool was_writer, const std
 }
 
 void BufferPool::flush_page(page_id_t pid) {
+  std::lock_guard<std::mutex> l(mu_);
   auto it = table_.find(pid);
   if (it == table_.end()) return;
   Frame& f = *frames_[it->second];
@@ -186,25 +197,33 @@ void BufferPool::flush_page(page_id_t pid) {
 }
 
 void BufferPool::flush_all() {
+  std::lock_guard<std::mutex> l(mu_);
   for (auto& f : frames_)
     if (f->pid != kInvalidPage && f->dirty) write_back(*f);
 }
 
 std::size_t BufferPool::pin_count(page_id_t pid) const {
+  std::lock_guard<std::mutex> l(mu_);
   auto it = table_.find(pid);
   return it == table_.end() ? 0 : frames_[it->second]->pins;
 }
-bool BufferPool::is_cached(page_id_t pid) const { return table_.count(pid) != 0; }
+bool BufferPool::is_cached(page_id_t pid) const {
+  std::lock_guard<std::mutex> l(mu_);
+  return table_.count(pid) != 0;
+}
 bool BufferPool::is_dirty(page_id_t pid) const {
+  std::lock_guard<std::mutex> l(mu_);
   auto it = table_.find(pid);
   return it != table_.end() && frames_[it->second]->dirty;
 }
 std::size_t BufferPool::dirty_count() const {
+  std::lock_guard<std::mutex> l(mu_);
   std::size_t n = 0;
   for (auto& f : frames_) n += (f->pid != kInvalidPage && f->dirty) ? 1 : 0;
   return n;
 }
 std::vector<page_id_t> BufferPool::dirty_pages() const {
+  std::lock_guard<std::mutex> l(mu_);
   std::vector<page_id_t> out;
   for (auto& f : frames_)
     if (f->pid != kInvalidPage && f->dirty) out.push_back(f->pid);
@@ -212,6 +231,7 @@ std::vector<page_id_t> BufferPool::dirty_pages() const {
 }
 
 void BufferPool::discard_all() {
+  std::lock_guard<std::mutex> l(mu_);
   for (auto& f : frames_) {
     if (f->pins != 0) throw StorageError("discard_all with pinned pages");
   }

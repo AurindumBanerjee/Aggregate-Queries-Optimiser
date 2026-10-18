@@ -89,13 +89,13 @@ void dot_command(Database& db, Session& s, const std::string& line, bool& show_p
     show_plan = arg != "off";
   } else if (cmd == ".stats") {
     auto& e = db.engine();
-    auto& bs = e.pool().stats();
+    auto bs = e.pool().stats();
     std::cout << "commits=" << e.stats().commits << " aborts=" << e.stats().aborts << " checkpoints=" << e.stats().checkpoints
               << " buffer hit rate=" << std::fixed << std::setprecision(3) << bs.hit_rate() << " evictions=" << bs.evictions
               << " wal bytes=" << (e.wal() ? e.wal()->bytes_appended() : 0) << "\n";
   } else if (cmd == ".checkpoint") {
     if (s.in_transaction()) std::cerr << "finish the open transaction first\n";
-    else db.engine().checkpoint();
+    else db.checkpoint();
   } else {
     std::cerr << "unknown command " << cmd << " (try .help)\n";
   }

@@ -9,6 +9,7 @@ add_executable(aqo_tests
   table_test.cpp
   range_structs_test.cpp
   sql_test.cpp
+  concurrency_test.cpp
   crash_kill_test.cpp
 )
 target_link_libraries(aqo_tests PRIVATE aqo GTest::gtest GTest::gtest_main)

@@ -110,8 +110,14 @@ class BufferPool {
   [[nodiscard]] bool is_dirty(page_id_t pid) const;
   [[nodiscard]] std::size_t dirty_count() const;
   [[nodiscard]] std::vector<page_id_t> dirty_pages() const;
-  [[nodiscard]] const BufferStats& stats() const { return stats_; }
-  void reset_stats() { stats_ = {}; }
+  [[nodiscard]] BufferStats stats() const {
+    std::lock_guard<std::mutex> l(mu_);
+    return stats_;
+  }
+  void reset_stats() {
+    std::lock_guard<std::mutex> l(mu_);
+    stats_ = {};
+  }
   DiskManager& disk() { return disk_; }
 
   /// Drops every cached page without writing (simulates losing memory in a crash). Test hook.
@@ -126,11 +132,14 @@ class BufferPool {
     bool dirty = false;
     bool writer = false;  // a write guard is outstanding (at most one per page)
   };
+  PageGuard fetch_locked(page_id_t pid);
+  void write_back_locked(Frame& f);
   void unpin(std::size_t frame, bool dirty, bool was_writer, const std::byte* before);
   std::size_t acquire_frame();
   void write_back(Frame& f);
 
   DiskManager& disk_;
+  mutable std::mutex mu_;  // guards every field below: concurrent readers pin/unpin pages (ADR 0009)
   std::vector<std::unique_ptr<Frame>> frames_;
   std::unordered_map<page_id_t, std::size_t> table_;
   std::vector<std::size_t> free_;

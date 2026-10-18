@@ -4,6 +4,7 @@
 
 #include <map>
 #include <memory>
+#include <shared_mutex>
 
 #include "aqo/table.hpp"
 
@@ -17,6 +18,10 @@ class Database {
   Database& operator=(const Database&) = delete;
 
   StorageEngine& engine() { return engine_; }
+  /// Many readers or one writer (a write transaction holds it exclusively from BEGIN to COMMIT).
+  std::shared_mutex& rw_mutex() { return rw_; }
+  /// Checkpoint under the exclusive lock (safe while other sessions are running).
+  void checkpoint();
 
   Table& create_table(const std::string& name, std::vector<Column> cols);
   /// Builds an aggregate index on a numeric column and records it in the catalog.
@@ -34,6 +39,7 @@ class Database {
   void persist_schema(Entry& e);
 
   StorageEngine engine_;
+  std::shared_mutex rw_;
   std::map<std::string, Entry> tables_;
   std::vector<std::function<void()>> undo_;
   std::int64_t next_id_ = 1;

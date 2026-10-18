@@ -26,6 +26,11 @@ Database::Database(EngineOptions opts) : engine_(std::move(opts)) {
 
 Database::~Database() { engine_.remove_txn_listener(listener_); }
 
+void Database::checkpoint() {
+  std::unique_lock<std::shared_mutex> l(rw_);
+  engine_.checkpoint();
+}
+
 Table* Database::find_table(const std::string& name) {
   auto it = tables_.find(name);
   return it == tables_.end() ? nullptr : it->second.table.get();

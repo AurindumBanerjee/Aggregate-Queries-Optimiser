@@ -17,6 +17,8 @@ jobs:
             flags: -DCMAKE_BUILD_TYPE=Release
           - name: asan-ubsan
             flags: -DCMAKE_BUILD_TYPE=Debug -DAQO_SANITIZE=ON
+          - name: tsan
+            flags: -DCMAKE_BUILD_TYPE=RelWithDebInfo -DAQO_SANITIZE_THREAD=ON
     steps:
       - uses: actions/checkout@v4
       - name: Install deps
