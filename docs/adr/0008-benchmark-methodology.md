@@ -30,13 +30,13 @@ The mutex's cost is not separable from that noise, but run 3 (with mutex) is wit
 | Random-key insert | **80k rows/s** | 41k rows/s | aqo 1.8-2.7x faster |
 | Insert + indexes (aqo: 2 aggregate; SQLite: 2 secondary) | **42k rows/s** | 18k rows/s | aqo 1.6-2.5x faster |
 | Point lookup, best case each | 132k ops/s (p50 2.0us, p99 37-66us) | **541k ops/s** (p50 1.5us) | SQLite 3.7-5.0x faster |
-| Range SUM/COUNT/MAX at 0.01% / 1% / 50% of rows | **4 / 15 / 31 us** | 22 / 1,473 / 81,486 us | aqo 5x / 98-112x / 1,880-2,650x |
+| Range SUM/COUNT/MAX at 0.01% / 1% / 50% of rows | **4 / 15 / 31 us** | 22 / 1,473 / 81,486 us | aqo 5-7x / 98-112x / 2,340-2,650x |
 | Full-table-scan aggregate (1%-range query, no usable index) | 520 ms | **71 ms** | SQLite 7.5-10x faster |
 | Reopen incl. aggregate-index rebuild | 5.4-10 s | n/a | |
 | Crash recovery of 100k un-checkpointed inserts | 198-487 ms | n/a | |
 
 * **The headline result** is range aggregates: aqo's latency is nearly flat in selectivity (O(log n)); SQLite's grows
-  linearly with rows matched. At 1% of rows that is ~100x, at 50% ~2,000x+, and the ratio held in every run.
+  linearly with rows matched. At 1% of rows that is ~100x and at 50% ~2,300-2,650x (direct-API p50), and the ratios held in every run.
 * **Honest negatives**: SQLite is faster at sequential bulk load, point reads and scans. aqo's scan decodes each row
   into `std::variant` values and allocates strings; there is no vectorisation or row-format shortcut. aqo's win on
   random-key inserts is real in all runs but I did not investigate why (candidate: SQLite's per-commit WAL
