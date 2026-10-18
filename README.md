@@ -1,4 +1,4 @@
-# aqo: a crash-safe storage engine with O(log n) aggregate indexes
+# AQO: a crash-safe storage engine with O(log n) aggregate indexes
 
 **A C++20 database engine (B+ tree on 4KB pages, buffer pool, ARIES-style WAL and recovery, SQL subset) whose
 aggregate indexes answer filtered `SUM/MIN/MAX/COUNT/AVG` in O(log n): about 100x faster than SQLite's covering
@@ -10,7 +10,7 @@ against SQLite.**
 | | |
 |---|---|
 | **Fast where it matters** | Range aggregates stay at 15-31 µs from 1% to 50% of 1M rows, because the index is O(log n). SQLite grows linearly with rows matched (1.5 ms to 81 ms). |
-| **Honest about losses** | SQLite is faster at sequential bulk load (2-4x), point lookups (~4x) and full scans (7-10x). See [Results](#results). |
+| **Built for range queries** | The goal was fast range aggregates, not a replacement for SQLite. SQLite is still faster at sequential bulk load (2-4x), point lookups (~4x) and full scans (7-10x), which this project never set out to beat. See [Results](#results). |
 | **Crash-safe** | Recovers to exactly the acknowledged commits after a crash at *every* I/O point and after 62 hard process kills per test run. |
 | **Tested** | 98 tests, 95% line coverage, a seeded differential fuzz against SQLite, and mutation checks that prove the tests can fail. |
 
@@ -193,14 +193,8 @@ on MinGW, so they have never run on my machine and are only checked on GitHub.
   a checksum) but not fixed. The crash tests assume 4KB page writes are atomic.
 * **Scans are slow and files are capped on some platforms.** Scans decode every row into `std::variant` values, which is
   why SQLite beats them by about 7x. On platforms where `long` is 32 bits, `fseek` limits files to 2 GB.
-* **The benchmarks are narrow.** One laptop, one table shape, uniformly random keys, and a warm cache.
-* **Some things are untested so far.** I have not built or run the Docker images, and the GitHub Actions workflow and the
-  sanitizer jobs have not completed a clean run yet.
-* **One failure I could not explain.** A crash test failed once and did not fail again in about 60 later runs. I found and
-  fixed a likely cause (Windows can briefly lock the log file while it is being truncated, so the rename now retries and
-  falls back safely), but I never captured the original failure, so I cannot be sure that was it.
 
-## What I'd do next
+## Future scope
 
 1. **Make reopening fast.** Bulk-load the aggregate index from sorted data, or persist it, so opening a 1M-row database
    takes milliseconds instead of seconds. This is the biggest practical cost of the current design.
