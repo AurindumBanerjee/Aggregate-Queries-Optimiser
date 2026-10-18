@@ -8,7 +8,7 @@ on:
 jobs:
   build-test:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -20,7 +20,7 @@ jobs:
           - name: tsan
             flags: -DCMAKE_BUILD_TYPE=RelWithDebInfo -DAQO_SANITIZE_THREAD=ON
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev libsqlite3-dev
       - name: Configure
@@ -33,13 +33,13 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install deps
         run: sudo apt-get update && sudo apt-get install -y ninja-build libgtest-dev libsqlite3-dev gcovr
       - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DAQO_COVERAGE=ON
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
       - name: Enforce >= 70% line coverage on core logic
-        run: gcovr -r . --filter 'include/aqo/' --filter 'src/' --fail-under-line 70 --print-summary
+        run: gcovr -r . --filter 'include/aqo/' --filter 'src/' --gcov-ignore-parse-errors negative_hits.warn_once_per_file --fail-under-line 70 --print-summary

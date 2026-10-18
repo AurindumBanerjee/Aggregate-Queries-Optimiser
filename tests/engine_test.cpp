@@ -11,6 +11,10 @@ namespace aqo {
 namespace {
 using namespace aqo::testing;
 
+// Simulated crashes abandon an open transaction without rolling it back. The handle is parked here, a
+// file-scope pointer that stays reachable, so LeakSanitizer does not report the deliberate leak.
+Txn* g_crashed_txn = nullptr;
+
 struct TempDb {
   std::string path;
   explicit TempDb(const std::string& n) : path(aqo::testing::unique_path("eng_" + n, ".db")) {
@@ -76,7 +80,7 @@ TEST(Engine, UncommittedTransactionIsRolledBackAfterCrash) {
     for (int i = 0; i < 20; ++i) tree.erase(i);
     EXPECT_GT(e.disk().writes(), 20u) << "dirty uncommitted pages were evicted to disk";
     // crash: engine destroyed with t2 still open (leak the txn handle to avoid a clean rollback)
-    new Txn(std::move(t2));  // intentionally leaked
+    g_crashed_txn = new Txn(std::move(t2));  // intentionally never freed: models a crash with no clean rollback
   }
   StorageEngine e(opts(d));
   EXPECT_EQ(e.recovery_stats().losers, 1u);
