@@ -90,88 +90,130 @@ eviction or a checkpoint.
 
 ## Results
 
-1,000,000 rows on an Intel i5-1240P laptop (12C/16T, 63.7 GiB RAM, NVMe SSD), Windows 11, GCC 13.1 `-O3`, SQLite 3.42.0.
-Both engines use a 64 MiB cache, a WAL and an fsync per 10k-row commit. Numbers are the **median of 3 full runs, with
-(min-max) in brackets**. Run-to-run variance on this laptop reached about 2.5x, so only ratios that held in all three
-runs are claimed. Method, fairness choices and caveats are in [ADR 0008](docs/adr/0008-benchmark-methodology.md), and the
-raw data is in [bench/results/](bench/results/).
+Everything below ran on one laptop with 1,000,000 rows: Intel i5-1240P (12 cores, 16 threads), 63.7 GiB RAM, NVMe SSD,
+Windows 11, GCC 13.1 `-O3`, SQLite 3.42.0. Both engines got a 64 MiB cache, a write-ahead log, and an fsync after every
+10,000-row commit. Each number is the **median of 3 full runs, with the (min–max) across those runs in brackets**.
+Run-to-run variance on this laptop reached about 2.5x, so I only claim differences that showed up in all three runs.
+The ratio column divides the two medians. How the benchmark was set up, and what I did to keep it fair, is in
+[ADR 0008](docs/adr/0008-benchmark-methodology.md); the raw runs are in [bench/results/](bench/results/).
+
+**What each row measures**
+
+* **Range aggregate:** `SELECT COUNT(*), SUM(a), SUM(b), MAX(c) FROM t WHERE a >= lo AND a <= hi`, where the range covers
+  the stated share of the 1M rows. The number is the median time for one query in microseconds (µs), so **lower is
+  better**. SQLite gets a covering index on `(a, b, c)` so that it does not have to scan the table.
+* **Insert:** rows written per second, so **higher is better**. Rows go in batches of 10,000 per transaction.
+  "Random keys" means the primary keys arrive shuffled; "with indexes" means aqo maintains two aggregate indexes and SQLite
+  maintains two ordinary secondary indexes.
+* **Point lookup:** primary-key lookups per second, so **higher is better**. SQLite's figure is its best case, with all
+  lookups inside one open read transaction.
+* **Full scan:** the same aggregate query when no index can help, so both engines read all 1M rows. Time per query in
+  milliseconds (ms), so **lower is better**.
 
 ### Where aqo wins
 
-| Workload | aqo | SQLite |
-|---|---:|---:|
-| Range SUM/COUNT/MAX, 0.01% of rows (p50 µs) | 4.2 (2.7–9.7) | 22.0 (17.7–67.1) |
-| Range SUM/COUNT/MAX, 1% of rows (p50 µs) | **14.9** (13.4–22.8) | 1,473 (1,354–2,547) |
-| Range SUM/COUNT/MAX, 10% of rows (p50 µs) | **17.1** (16.9–29.8) | 14,466 (13,810–26,682) |
-| Range SUM/COUNT/MAX, 50% of rows (p50 µs) | **30.8** (30.2–50.7) | 81,486 (70,719–118,821) |
-| Insert, random primary keys (rows/s) | **79,706** (57,871–108,958) | 40,525 (26,665–45,643) |
-| Insert with indexes (rows/s) | **42,047** (29,760–62,666) | 18,424 (17,048–28,847) |
+| Workload | Unit | aqo | SQLite | Ratio (aqo's advantage) |
+|---|---|---:|---:|---:|
+| Range aggregate, 0.01% of rows | µs per query, lower is better | 4.2 (2.7–9.7) | 22.0 (17.7–67.1) | 5x faster |
+| Range aggregate, 1% of rows | µs per query, lower is better | **14.9** (13.4–22.8) | 1,473 (1,354–2,547) | 99x faster |
+| Range aggregate, 10% of rows | µs per query, lower is better | **17.1** (16.9–29.8) | 14,466 (13,810–26,682) | 846x faster |
+| Range aggregate, 50% of rows | µs per query, lower is better | **30.8** (30.2–50.7) | 81,486 (70,719–118,821) | 2,646x faster |
+| Insert, random keys | rows per second, higher is better | **79,706** (57,871–108,958) | 40,525 (26,665–45,643) | 2.0x faster |
+| Insert, with indexes | rows per second, higher is better | **42,047** (29,760–62,666) | 18,424 (17,048–28,847) | 2.3x faster |
 
 ### Where SQLite wins
 
-| Workload | aqo | SQLite |
-|---|---:|---:|
-| Insert, sequential keys (rows/s) | 193,742 (142,058–203,785) | **744,884** (304,791–855,846) |
-| Point lookup, best case for each (ops/s) | 131,640 | **541,244** |
-| Aggregate with no usable index, full scan (ms) | 520 | **71** |
+| Workload | Unit | aqo | SQLite | Ratio (SQLite's advantage) |
+|---|---|---:|---:|---:|
+| Insert, sequential keys | rows per second, higher is better | 193,742 (142,058–203,785) | **744,884** (304,791–855,846) | 3.8x faster |
+| Point lookup by primary key | lookups per second, higher is better | 131,640 | **541,244** | 4.1x faster |
+| Aggregate over a range with no usable index (full scan) | ms per query, lower is better | 520 | **71** | 7.3x faster |
 
 ### Costs of the design
 
-| Measurement | Value |
-|---|---|
-| Crash recovery of 100k un-checkpointed inserts | 198–487 ms |
-| Reopen including aggregate-index rebuild | 5.4–10 s |
+These have no SQLite counterpart: they come from how aqo is built.
 
-![Range aggregate latency vs selectivity](docs/bench_range_aggregates.png)
+| Measurement | Unit | Value | What it means |
+|---|---|---:|---|
+| Crash recovery of 100,000 inserts that were never checkpointed | milliseconds | 198–487 | Time to replay the log after a crash |
+| Reopen with the aggregate index rebuilt | seconds | 5.4–10 | The index is in memory, so it is rebuilt from the table on every open |
+
+![Range aggregate latency against selectivity](docs/bench_range_aggregates.png)
 ![Insert and lookup throughput](docs/bench_insert_lookup.png)
+
+The first chart plots median query latency in µs (log scale) against the share of rows matched (log scale): aqo's line
+stays almost flat while SQLite's climbs with every extra row it has to read. In the second chart, the left panel shows
+insert throughput in thousands of rows per second and the right panel shows lookups per second in thousands.
 
 ## How I know it works
 
-* **B+ tree:** randomized insert/erase/scan against `std::map` over node orders 3-64, plus aggregates against brute force.
-* **Disk tree:** the same property test with a 10-frame buffer pool (constant eviction), for both LRU and Clock.
-* **Crash safety:**
-  * A sweep crashes at *every* I/O point (page write, log write, fsync) of a 40-transaction workload, simulates power
-    loss with torn log tails, optionally crashes again during recovery, and checks that the database equals the model
-    after exactly the acknowledged commits.
-  * A second test hard-kills a real worker process 62 times per run (TerminateProcess or SIGKILL) and verifies the same
-    invariant.
-* **SQL:** unit tests plus a seeded differential fuzz against SQLite, which compares the index plan, the scan plan and
-  SQLite. Deliberately breaking range bounds made it fail, which confirms it can catch real bugs.
-* **Concurrency:** readers see only committed state during a concurrent money-transfer workload, four writers lose no
-  updates, and the pool survives parallel eviction.
-* **Coverage:** 95.1% of lines, 98.7% of functions, 62% of branches (gcov, local run). CI gates at 70% of lines.
+I put most of the testing effort where bugs are most likely and most expensive: the tree code, crash recovery, and the
+aggregate index.
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds Release, ASan+UBSan, ThreadSanitizer and coverage on
-Linux. Sanitizers could not run locally on MinGW, so they are checked only on GitHub.
+**The trees.** I generate long random sequences of inserts, deletes, lookups and range scans, run them against both the
+in-memory and the on-disk B+ tree, and compare every answer with `std::map`. The in-memory tree is tested at node sizes
+from 3 to 64, because tiny nodes force a split or merge on almost every operation. The on-disk tree runs with only 10
+buffer-pool frames, so pages are evicted and reloaded constantly, once with LRU and once with Clock.
+
+**Crashes.** There are two kinds of test.
+
+* The first crashes the engine at every I/O point of a 40-transaction workload, one at a time: each page write, each log
+  write and each fsync. After every simulated power loss (sometimes leaving a half-written record at the end of the log,
+  and sometimes crashing a second time during recovery) it reopens the database and checks that it holds exactly the
+  transactions that were acknowledged, nothing more and nothing less.
+* The second starts a real worker process and kills it at a random moment, 62 times per run (TerminateProcess on Windows,
+  SIGKILL elsewhere), then recovers and checks the same thing. Because the kill timing is random, a pass is good evidence
+  but not proof.
+
+**SQL answers.** Besides ordinary unit tests, a seeded fuzz test sends the same random statements to aqo (with and without
+the aggregate index) and to SQLite, and the answers must match. To check that the fuzz test can actually fail, I broke the
+index's range-bound handling on purpose. My first version missed that bug, so I changed the generator to favour
+single-column ranges, and now it catches it.
+
+**Concurrency.** One test moves money between accounts while readers keep checking that the total never changes, which
+shows readers only ever see committed transactions. Others check that four competing writers lose no updates and that the
+buffer pool holds up when several threads evict pages at once.
+
+**Coverage and CI.** The tests cover 95.1% of lines, 98.7% of functions and 62% of branches (measured locally with gcov),
+and CI fails below 70% of lines. The GitHub workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds a
+Release binary, an ASan+UBSan build, a ThreadSanitizer build and a coverage build, all on Linux. The sanitizers do not run
+on MinGW, so they have never run on my machine and are only checked on GitHub.
 
 ## Limitations
 
-* **Concurrency:** single node and single writer. A write transaction blocks all readers and vice versa. There is no
-  MVCC and no group commit.
-* **Aggregate index memory and startup:** the indexes are in memory (about 72 bytes per row per index) and are rebuilt
-  from the table on open, which took 5-10 s at 1M rows.
-* **Rows and types:** a row must fit one page (at most 992 bytes encoded, no overflow pages). All columns are NOT NULL,
-  and the types are INT, REAL and TEXT.
-* **SQL coverage:** subset only. No joins, subqueries, HAVING, DISTINCT, prepared statements or non-aggregate secondary
-  indexes.
-* **Durability model:** torn *data-page* writes are detected (CRC) but not repaired. The fault model assumes atomic 4KB
-  page writes.
-* **Performance gaps:** scans are slow (rows decode into `std::variant`). On 32-bit-`long` platforms, `fseek` limits
-  files to 2 GB.
-* **Benchmark scope:** one laptop, one table shape, uniform random keys, warm cache.
-* **Not yet verified:** the Docker images, the GitHub Actions workflow and the sanitizer jobs.
-* **Unexplained test failure:** a crash test failed once and never reproduced in about 60 later runs. The likeliest cause,
-  a transient Windows file lock during log truncation, was fixed with a retry and fallback, but the original failure
-  was not captured.
+* **One writer at a time.** While a write transaction is open, readers wait, and while readers are active, a writer waits.
+  There is no MVCC and no group commit.
+* **The aggregate index lives in memory.** It costs about 72 bytes per row per index and is rebuilt from the table every
+  time the database opens, which took 5–10 s for 1M rows.
+* **Rows have to be small.** A row must fit in one 4KB page (at most 992 bytes once encoded), because there are no overflow
+  pages. Every column is NOT NULL, and the only types are INT, REAL and TEXT.
+* **The SQL is a subset.** There are no joins, subqueries, HAVING, DISTINCT or prepared statements, and no secondary
+  indexes other than the aggregate ones.
+* **Torn pages are not repaired.** A data page damaged by a power loss in the middle of a write is detected (each page has
+  a checksum) but not fixed. The crash tests assume 4KB page writes are atomic.
+* **Scans are slow and files are capped on some platforms.** Scans decode every row into `std::variant` values, which is
+  why SQLite beats them by about 7x. On platforms where `long` is 32 bits, `fseek` limits files to 2 GB.
+* **The benchmarks are narrow.** One laptop, one table shape, uniformly random keys, and a warm cache.
+* **Some things are untested so far.** I have not built or run the Docker images, and the GitHub Actions workflow and the
+  sanitizer jobs have not completed a clean run yet.
+* **One failure I could not explain.** A crash test failed once and did not fail again in about 60 later runs. I found and
+  fixed a likely cause (Windows can briefly lock the log file while it is being truncated, so the rename now retries and
+  falls back safely), but I never captured the original failure, so I cannot be sure that was it.
 
 ## What I'd do next
 
-1. Bulk-load the aggregate index and persist it, cutting reopen from seconds to milliseconds.
-2. Add a row-oriented scan path (no `std::variant`) and prepared statements, to close the scan and point-lookup gaps.
-3. Add MVCC or snapshot reads so readers do not block on a writer, and group commit to amortize fsync.
-4. Add a double-write buffer or full-page images to survive torn page writes, and overflow pages for large values.
-5. Run the sanitizer and TSan jobs on GitHub, fix whatever they find, and add a pinned clang-format check.
-6. Add joins (hash and index nested loop) and a cost-based planner that uses the aggregate index for selectivity estimates.
+1. **Make reopening fast.** Bulk-load the aggregate index from sorted data, or persist it, so opening a 1M-row database
+   takes milliseconds instead of seconds. This is the biggest practical cost of the current design.
+2. **Close the performance gaps.** Add a row-oriented scan path that avoids `std::variant`, plus prepared statements, to
+   narrow SQLite's lead on scans and point lookups.
+3. **Let readers and writers overlap.** Add MVCC or snapshot reads so readers do not wait for a writer, and group commit
+   so concurrent commits share one fsync.
+4. **Survive torn pages and big values.** Add a double-write buffer or full-page images in the log, and overflow pages for
+   values bigger than one page.
+5. **Finish the CI story.** Get the sanitizer and ThreadSanitizer jobs passing on GitHub, fix whatever they find, and add a
+   formatting check with a pinned clang-format version.
+6. **Grow the SQL.** Add joins (hash join and index nested loop) and a cost-based planner that uses the aggregate index to
+   estimate how many rows a filter will match.
 
 ## Repository map
 
