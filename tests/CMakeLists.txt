@@ -6,6 +6,8 @@ add_executable(aqo_tests
   disk_btree_test.cpp
   wal_test.cpp
   engine_test.cpp
+  table_test.cpp
+  range_structs_test.cpp
   crash_kill_test.cpp
 )
 target_link_libraries(aqo_tests PRIVATE aqo GTest::gtest GTest::gtest_main)

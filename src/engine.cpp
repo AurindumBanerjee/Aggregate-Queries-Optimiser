@@ -126,6 +126,25 @@ Txn StorageEngine::begin() {
   return Txn(this, id);
 }
 
+std::size_t StorageEngine::add_txn_listener(std::function<void(bool)> fn) {
+  listeners_.emplace_back(next_listener_, std::move(fn));
+  return next_listener_++;
+}
+void StorageEngine::remove_txn_listener(std::size_t token) {
+  std::erase_if(listeners_, [&](auto& p) { return p.first == token; });
+}
+void StorageEngine::notify(bool committed) {
+  // Listeners may remove themselves (or others) while running, so snapshot the tokens and re-look each up.
+  std::vector<std::size_t> tokens;
+  for (auto& [id, fn] : listeners_) tokens.push_back(id);
+  for (auto t : tokens) {
+    auto it = std::find_if(listeners_.begin(), listeners_.end(), [&](auto& p) { return p.first == t; });
+    if (it == listeners_.end()) continue;
+    auto fn = it->second;
+    fn(committed);
+  }
+}
+
 void StorageEngine::commit_active() {
   if (wal_) {
     LogRecord r;
@@ -139,6 +158,7 @@ void StorageEngine::commit_active() {
     active_.reset();
   }
   ++stats_.commits;
+  notify(true);
 }
 
 void StorageEngine::abort_active() {
@@ -166,6 +186,7 @@ void StorageEngine::abort_active() {
   wal_->append(end);
   active_.reset();
   ++stats_.aborts;
+  notify(false);
 }
 
 void StorageEngine::checkpoint() {

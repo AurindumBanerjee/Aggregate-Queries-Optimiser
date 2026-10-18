@@ -2,6 +2,7 @@
 // single-writer transactions with physical (before/after image) logging. See docs/adr/0006-wal-recovery.md.
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -70,6 +71,10 @@ class StorageEngine {
   void close();
 
   [[nodiscard]] bool in_txn() const { return active_.has_value(); }
+  /// Listeners run after every commit (true) or rollback (false). Derived in-memory state (aggregate
+  /// indexes, caches) uses this to stay consistent with the durable state. Returns a removal token.
+  std::size_t add_txn_listener(std::function<void(bool committed)> fn);
+  void remove_txn_listener(std::size_t token);
   Pager& pager() { return *pager_; }
   BufferPool& pool() { return pool_; }
   Wal* wal() { return wal_.get(); }
@@ -99,6 +104,9 @@ class StorageEngine {
   std::unique_ptr<Pager> pager_;
   std::optional<ActiveTxn> active_;
   std::map<page_id_t, lsn_t> dirty_table_;  // page -> LSN of the first update since it was last written
+  std::vector<std::pair<std::size_t, std::function<void(bool)>>> listeners_;
+  std::size_t next_listener_ = 1;
+  void notify(bool committed);
   txn_id_t next_txn_ = 1;
   RecoveryStats recovery_;
   EngineStats stats_;
