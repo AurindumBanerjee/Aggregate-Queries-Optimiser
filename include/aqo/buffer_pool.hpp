@@ -82,6 +82,13 @@ class BufferPool {
 
   /// Pins page `pid`, reading it from disk on a miss. Throws StorageError if every frame is pinned.
   PageGuard fetch(page_id_t pid);
+  /// Like fetch(), but the caller intends to modify the page: it is marked dirty up front and
+  /// (once the WAL is attached) the modification is logged when the guard is released.
+  PageGuard fetch_write(page_id_t pid) {
+    PageGuard g = fetch(pid);
+    g.mark_dirty();
+    return g;
+  }
   /// Writes one page back if dirty (honouring the WAL rule via the log-flush hook).
   void flush_page(page_id_t pid);
   void flush_all();
