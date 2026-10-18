@@ -35,7 +35,7 @@ void sync_file(std::FILE* f) {
 #endif
 }
 
-DiskManager::DiskManager(const std::string& path) : path_(path) {
+DiskManager::DiskManager(const std::string& path, FaultInjector* faults) : path_(path), faults_(faults) {
   file_ = std::fopen(path.c_str(), "r+b");
   if (file_ == nullptr) file_ = std::fopen(path.c_str(), "w+b");
   if (file_ == nullptr) throw StorageError("cannot open database file: " + path);
@@ -67,6 +67,7 @@ void DiskManager::read_page(page_id_t pid, std::byte* buf) {
 }
 
 void DiskManager::write_page(page_id_t pid, const std::byte* buf) {
+  if (faults_ != nullptr && faults_->should_crash()) throw SimulatedCrash();  // page writes are atomic in this model
   ++writes_;
   std::byte copy[kPageSize];
   std::memcpy(copy, buf, kPageSize);
@@ -84,6 +85,12 @@ void DiskManager::write_page(page_id_t pid, const std::byte* buf) {
   if (pid >= page_count_) page_count_ = pid + 1;
 }
 
-void DiskManager::sync() { sync_file(file_); }
+void DiskManager::sync() {
+  if (faults_ != nullptr) {
+    if (faults_->should_crash()) throw SimulatedCrash();
+    return;  // tests with an injector skip the real fsync
+  }
+  sync_file(file_);
+}
 
 }  // namespace aqo

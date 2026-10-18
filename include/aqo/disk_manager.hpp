@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <string>
 
+#include "aqo/fault_injector.hpp"
 #include "aqo/page.hpp"
 
 namespace aqo {
@@ -11,7 +12,7 @@ namespace aqo {
 class DiskManager {
  public:
   /// Opens (creating if needed) the file at `path`.
-  explicit DiskManager(const std::string& path);
+  explicit DiskManager(const std::string& path, FaultInjector* faults = nullptr);
   ~DiskManager();
   DiskManager(const DiskManager&) = delete;
   DiskManager& operator=(const DiskManager&) = delete;
@@ -31,6 +32,7 @@ class DiskManager {
 
  private:
   std::string path_;
+  FaultInjector* faults_ = nullptr;
   std::FILE* file_ = nullptr;
   page_id_t page_count_ = 0;
   std::uint64_t reads_ = 0;

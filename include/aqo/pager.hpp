@@ -15,6 +15,8 @@ class Pager {
   /// Opens the meta page, formatting a brand-new file. Throws on a foreign/corrupt file.
   explicit Pager(BufferPool& pool);
 
+  /// True if this constructor created the meta page (a brand-new database).
+  [[nodiscard]] bool was_formatted() const { return formatted_; }
   page_id_t allocate();
   void free(page_id_t pid);
 
@@ -27,6 +29,7 @@ class Pager {
 
  private:
   BufferPool& pool_;
+  bool formatted_ = false;
 };
 
 }  // namespace aqo

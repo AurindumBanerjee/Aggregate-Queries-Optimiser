@@ -208,23 +208,16 @@ bool DiskBTree::put(std::int64_t key, std::span<const std::byte> value, bool ove
 
 bool DiskBTree::leaf_put(page_id_t parent, std::size_t c, page_id_t leaf, std::int64_t key, const Bytes& rec,
                          bool overwrite) {
-  auto lg = pool_.fetch(leaf);
+  auto lg = pool_.fetch_write(leaf);
   SlottedPage sp(lg.data());
   std::size_t idx = lower_idx(sp, key);
   bool exists = idx < sp.count() && key_of(sp.get(idx)) == key;
   if (exists) {
     if (!overwrite) return false;
-    if (sp.replace_at(idx, rec)) {
-      lg.mark_dirty();
-      return false;
-    }
+    if (sp.replace_at(idx, rec)) return false;
     sp.remove_at(idx);
-    lg.mark_dirty();
   }
-  if (sp.insert_at(idx, rec)) {
-    lg.mark_dirty();
-    return !exists;
-  }
+  if (sp.insert_at(idx, rec)) return !exists;
   lg.release();
   if (parent == kInvalidPage) throw std::logic_error("root leaf unexpectedly full");
   split_leaf(parent, c, leaf, idx, rec);
@@ -293,12 +286,11 @@ bool DiskBTree::erase(std::int64_t key) {
     cur = child_at(sp, c);
   }
   {
-    auto g = pool_.fetch(cur);
+    auto g = pool_.fetch_write(cur);
     SlottedPage sp(g.data());
     std::size_t i = lower_idx(sp, key);
     if (i >= sp.count() || key_of(sp.get(i)) != key) return false;
     sp.remove_at(i);
-    g.mark_dirty();
   }
   rebalance(path, cur);
   return true;

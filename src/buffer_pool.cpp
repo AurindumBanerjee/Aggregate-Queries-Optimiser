@@ -75,6 +75,8 @@ PageGuard& PageGuard::operator=(PageGuard&& o) noexcept {
     pid_ = o.pid_;
     data_ = o.data_;
     dirty_ = o.dirty_;
+    writer_ = o.writer_;
+    before_ = std::move(o.before_);
     o.pool_ = nullptr;
     o.data_ = nullptr;
   }
@@ -83,9 +85,11 @@ PageGuard& PageGuard::operator=(PageGuard&& o) noexcept {
 
 void PageGuard::release() {
   if (pool_ != nullptr) {
-    pool_->unpin(frame_, dirty_);
+    pool_->unpin(frame_, dirty_, writer_, before_.get());
     pool_ = nullptr;
     data_ = nullptr;
+    writer_ = false;
+    before_.reset();
   }
 }
 
@@ -148,9 +152,28 @@ PageGuard BufferPool::fetch(page_id_t pid) {
   return PageGuard(this, idx, pid, f.data);
 }
 
-void BufferPool::unpin(std::size_t frame, bool dirty) {
+PageGuard BufferPool::fetch_write(page_id_t pid) {
+  if (write_gate_) write_gate_();
+  PageGuard g = fetch(pid);
+  Frame& f = *frames_[g.frame_];
+  if (f.writer) throw StorageError("page " + std::to_string(pid) + " already has an active write guard");
+  f.writer = true;
+  g.writer_ = true;
+  g.mark_dirty();
+  if (write_hook_) {
+    g.before_ = std::make_unique<std::byte[]>(kPageSize);
+    std::memcpy(g.before_.get(), f.data, kPageSize);
+  }
+  return g;
+}
+
+void BufferPool::unpin(std::size_t frame, bool dirty, bool was_writer, const std::byte* before) {
   Frame& f = *frames_[frame];
   if (f.pins == 0) throw StorageError("unpin of an unpinned page");
+  if (was_writer) {
+    f.writer = false;
+    if (before != nullptr && write_hook_) write_hook_(f.pid, before, f.data);
+  }
   if (dirty) f.dirty = true;
   if (--f.pins == 0) replacer_->unpinned(frame);
 }

@@ -6,13 +6,14 @@
 #include <filesystem>
 #include <string>
 
+#include "test_util.hpp"
+
 namespace aqo {
 namespace {
 
 struct TempFile {
   std::string path;
-  explicit TempFile(const std::string& name)
-      : path((std::filesystem::temp_directory_path() / ("aqo_" + name + ".db")).string()) {
+  explicit TempFile(const std::string& name) : path(aqo::testing::unique_path(name, ".db")) {
     std::remove(path.c_str());
   }
   ~TempFile() { std::remove(path.c_str()); }

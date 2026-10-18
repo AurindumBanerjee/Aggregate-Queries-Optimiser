@@ -56,6 +56,8 @@ class PageGuard {
   ~PageGuard() { release(); }
 
   [[nodiscard]] std::byte* data() const { return data_; }
+  /// True for guards obtained from fetch_write (the page is expected to change).
+  [[nodiscard]] bool is_writer() const { return writer_; }
   [[nodiscard]] page_id_t id() const { return pid_; }
   [[nodiscard]] explicit operator bool() const { return pool_ != nullptr; }
   /// Records that the page content was modified so it is written back on eviction/flush.
@@ -71,6 +73,8 @@ class PageGuard {
   page_id_t pid_ = kInvalidPage;
   std::byte* data_ = nullptr;
   bool dirty_ = false;
+  bool writer_ = false;
+  std::unique_ptr<std::byte[]> before_;  // snapshot taken by fetch_write when a write hook is installed
 };
 
 class BufferPool {
@@ -84,17 +88,19 @@ class BufferPool {
   PageGuard fetch(page_id_t pid);
   /// Like fetch(), but the caller intends to modify the page: it is marked dirty up front and
   /// (once the WAL is attached) the modification is logged when the guard is released.
-  PageGuard fetch_write(page_id_t pid) {
-    PageGuard g = fetch(pid);
-    g.mark_dirty();
-    return g;
-  }
+  PageGuard fetch_write(page_id_t pid);
   /// Writes one page back if dirty (honouring the WAL rule via the log-flush hook).
   void flush_page(page_id_t pid);
   void flush_all();
 
   /// Installed by the WAL: must make the log durable up to `lsn` before a page with that LSN is written.
   void set_log_flush_hook(std::function<void(lsn_t)> hook) { log_flush_ = std::move(hook); }
+  /// Called when a write guard is released: (page, before-image, live page). The hook may stamp a new
+  /// page LSN into the live page. It must not throw or perform I/O (it runs inside a destructor).
+  using WriteHook = std::function<void(page_id_t, const std::byte*, std::byte*)>;
+  void set_write_hook(WriteHook hook) { write_hook_ = std::move(hook); }
+  /// Called on every fetch_write before anything changes; may throw to veto (e.g. no open transaction).
+  void set_write_gate(std::function<void()> gate) { write_gate_ = std::move(gate); }
   /// Called after a dirty page has been written (used for the checkpoint dirty-page table).
   void set_page_written_hook(std::function<void(page_id_t)> hook) { page_written_ = std::move(hook); }
 
@@ -118,8 +124,9 @@ class BufferPool {
     page_id_t pid = kInvalidPage;
     std::size_t pins = 0;
     bool dirty = false;
+    bool writer = false;  // a write guard is outstanding (at most one per page)
   };
-  void unpin(std::size_t frame, bool dirty);
+  void unpin(std::size_t frame, bool dirty, bool was_writer, const std::byte* before);
   std::size_t acquire_frame();
   void write_back(Frame& f);
 
@@ -131,6 +138,8 @@ class BufferPool {
   BufferStats stats_;
   std::function<void(lsn_t)> log_flush_;
   std::function<void(page_id_t)> page_written_;
+  WriteHook write_hook_;
+  std::function<void()> write_gate_;
 };
 
 }  // namespace aqo

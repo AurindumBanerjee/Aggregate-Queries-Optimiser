@@ -10,6 +10,7 @@ Pager::Pager(BufferPool& pool) : pool_(pool) {
   auto g = pool_.fetch(kMetaPage);
   bool blank = pool_.disk().page_count() == 0 || load<std::uint64_t>(g.data() + kMagicOff) == 0;
   if (blank) {
+    formatted_ = true;
     std::memset(g.data() + kCommonHeader, 0, kPageSize - kCommonHeader);
     set_page_type(g.data(), PageType::kMeta);
     store<std::uint64_t>(g.data() + kMagicOff, kMagic);
