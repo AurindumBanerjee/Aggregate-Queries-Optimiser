@@ -8,8 +8,8 @@ Every number is from this repo's tests and `bench/results/` (median of 3 runs; o
   checkpoints and redo/undo recovery); validated by crash injection at every I/O point and 62 hard process kills per test
   run with zero consistency violations, then recovered 100k un-checkpointed inserts in 0.2–0.5 s.
 * Designed aggregate-augmented B+ tree indexes (a B-ary segment tree) giving O(log n) filtered SUM/MIN/MAX/COUNT: 15 µs
-  vs 1.47 ms for SQLite's covering index at 1% selectivity (~100x) and 31 µs vs 81 ms at 50% (~2,600x) on 1M rows,
-  median of 3 runs.
+  vs 1.47 ms for SQLite's covering index at 1% selectivity (~100x) and 31 µs vs 81 ms at 50% (~2,600x) on 1M rows (median
+  of 3 runs); the index is in-memory derived data (~72 B/row) rebuilt on open (5-10 s at 1M rows), trading startup time for query speed.
 * Wrote a SQL layer (tokenizer, parser, planner, executor, REPL) and verified it with a seeded differential fuzz
   against SQLite, mutation checks and 98 tests at 95% line coverage; found and fixed a Windows file-lock bug in log truncation.
 
@@ -25,7 +25,7 @@ I cached count/sum/min/max in the nodes of a B+ tree, so a filtered SUM costs O(
 faster at sequential loading, point lookups and scans, and I report that. On top sits a small SQL layer I checked
 against SQLite with differential fuzzing.
 
-## 10 likely questions
+## 11 likely questions
 
 1. **Why a B+ tree rather than a B-tree or LSM?** Values live only in leaves, so internal nodes hold just separators,
    fan-out is higher, and range scans follow a leaf chain. Deleting never needs predecessor swaps, which was the
@@ -58,3 +58,11 @@ against SQLite with differential fuzzing.
 10. **How do you trust the benchmark numbers?** Three full runs with the median and min–max reported, because run 2 was
     ~2x slower for both engines (throttling). Aggregate answers are cross-checked against SQLite before timing, SQLite
     gets a covering index and its best-case read transaction, and I only claim ratios that held in every run.
+11. **The aggregate index lives in memory and is rebuilt on open. Why, and what does it cost?** Making it derived data
+    means it is never logged, so crash recovery needs no index redo and an index bug can never corrupt durable state:
+    the table's B+ tree is the single source of truth, and recovery stays as simple as ADR 0006 describes. The costs are
+    real: about 72 bytes per row per index in RAM (a 1M-row index is roughly 72 MB), a rebuild on every open that took
+    5-10 s at 1M rows (about 6 us/row, an O(n log n) insert loop), and the index cannot exceed memory. I keep it
+    consistent with the table by updating it on every write and rolling it back with a per-transaction undo log on abort.
+    I would fix startup by bulk-loading from sorted data or persisting the index pages under the WAL, which trades back
+    some of that simplicity; I chose derived-and-rebuilt first because it was provably correct with far less code.

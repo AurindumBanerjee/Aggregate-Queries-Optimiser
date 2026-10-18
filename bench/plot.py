@@ -38,7 +38,8 @@ for k, rs in merged.items():
             out[f] = statistics.median(vals)
             out[f + "_min"], out[f + "_max"] = min(vals), max(vals)
     res.append(out)
-(ROOT / "bench" / "results" / "results.json").write_text(json.dumps({"config": data["config"], "runs": [f.name for f in run_files], "results": res}, indent=1), encoding="utf-8")
+(ROOT / "bench" / "results" / "results.json").write_text(json.dumps({"config": data["config"], "runs": [f.name for f in run_files], "results": res}, indent=1), encoding="utf-8", newline="\n")
+
 docs = ROOT / "docs"
 docs.mkdir(exist_ok=True)
 
@@ -116,5 +117,5 @@ for sel in sorted({r["selectivity"] for r in pick("range_aggregate")}):
         rows.append((f"Range aggregate {sel*100:g}% of rows, p50 µs", f"{fmt(a['p50_us'], 1)} ({fmt(a['p50_us_min'], 1)}–{fmt(a['p50_us_max'], 1)})",
                      f"{fmt(s['p50_us'], 1)} ({fmt(s['p50_us_min'], 1)}–{fmt(s['p50_us_max'], 1)})"))
 md = ["| Workload | aqo | SQLite |", "|---|---:|---:|"] + [f"| {a} | {b} | {c} |" for a, b, c in rows]
-(ROOT / "bench" / "results" / "table.md").write_text("\n".join(md) + "\n")
+(ROOT / "bench" / "results" / "table.md").write_text("\n".join(md) + "\n", encoding="utf-8", newline="\n")
 print("\n".join(md))
