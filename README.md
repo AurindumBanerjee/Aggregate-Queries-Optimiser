@@ -145,7 +145,7 @@ The first chart plots median query latency in µs (log scale) against the share 
 stays almost flat while SQLite's climbs with every extra row it has to read. In the second chart, the left panel shows
 insert throughput in thousands of rows per second and the right panel shows lookups per second in thousands.
 
-## How I know it works
+## Testing and verification
 
 I put most of the testing effort where bugs are most likely and most expensive: the tree code, crash recovery, and the
 aggregate index.
