@@ -25,9 +25,10 @@ if(AQO_COVERAGE)
   target_link_options(aqo_warnings INTERFACE --coverage)
 endif()
 
-add_library(aqo INTERFACE)
-target_include_directories(aqo INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(aqo INTERFACE aqo_warnings)
+file(GLOB AQO_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+add_library(aqo STATIC ${AQO_SOURCES})
+target_include_directories(aqo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(aqo PUBLIC aqo_warnings)
 
 if(AQO_BUILD_TESTS)
   enable_testing()
